@@ -1,0 +1,25 @@
+{
+    "name": "spotify-obs-overlay",
+    "version": "1.0.0",
+    "description": "Spotify OBS Overlay - Display currently playing songs in OBS",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node server.js"
+    },
+    "keywords": [
+        "spotify",
+        "obs",
+        "overlay",
+        "widget"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "express": "^4.18.2",
+        "axios": "^1.6.2",
+        "dotenv": "^16.3.1",
+        "cors": "^2.8.5",
+        "cookie-parser": "^1.4.6"
+    }
+}

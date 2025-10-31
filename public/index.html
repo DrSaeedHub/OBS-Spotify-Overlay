@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Primary Meta Tags -->
+    <title>Spotify OBS Overlay - Free Widget for Streaming | Real-time Now Playing Display</title>
+    <meta name="title" content="Spotify OBS Overlay - Free Widget for Streaming | Real-time Now Playing Display">
+    <meta name="description"
+        content="Create a beautiful Spotify OBS overlay widget for your live streams. Free, customizable, real-time now playing display for OBS Studio. Multiple styles: horizontal, retro, default. Perfect for streamers and content creators.">
+    <meta name="keywords"
+        content="spotify obs overlay, spotify obs widget, obs studio spotify widget, spotify now playing overlay, spotify stream overlay, obs spotify integration, free spotify overlay, customizable spotify widget, spotify overlay for streaming, obs browser source spotify">
+    <meta name="author" content="DrSaeedHub">
+    <meta name="robots" content="index, follow">
+    <meta name="language" content="English">
+    <meta name="revisit-after" content="7 days">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://obs-spotify-overlay.onrender.com/">
+    <meta property="og:title" content="Spotify OBS Overlay - Free Widget for Streaming">
+    <meta property="og:description"
+        content="Create a beautiful Spotify OBS overlay widget for your live streams. Free, customizable, real-time now playing display for OBS Studio.">
+    <meta property="og:image" content="https://obs-spotify-overlay.onrender.com/demo-preview.png">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://obs-spotify-overlay.onrender.com/">
+    <meta property="twitter:title" content="Spotify OBS Overlay - Free Widget for Streaming">
+    <meta property="twitter:description"
+        content="Create a beautiful Spotify OBS overlay widget for your live streams. Free, customizable, real-time now playing display for OBS Studio.">
+    <meta property="twitter:image" content="https://obs-spotify-overlay.onrender.com/demo-preview.png">
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://obs-spotify-overlay.onrender.com/">
+
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Spotify OBS Overlay",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "description": "Free Spotify OBS overlay widget that displays currently playing songs in real-time on your live streams. Fully customizable with multiple styles and effects.",
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "5",
+        "ratingCount": "1"
+      },
+      "featureList": [
+        "Real-time Spotify integration",
+        "Multiple widget styles (Default, Horizontal, Retro)",
+        "Customizable colors and effects",
+        "Dynamic album artwork",
+        "Progress bar and time display",
+        "Glassmorphism and liquid glass effects",
+        "Border and shadow customization",
+        "Easy OBS integration"
+      ],
+      "screenshot": "https://obs-spotify-overlay.onrender.com/demo-preview.png"
+    }
+    </script>
+
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/colorthief@2.4.0/dist/color-thief.umd.min.js"></script>
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-VXJLTHPHMR"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+        gtag('config', 'G-VXJLTHPHMR');
+    </script>
+</head>
+
+<body class="login-page">
+    <div class="container">
+        <div class="login-card">
+            <div class="logo">
+                <svg width="80" height="80" viewBox="0 0 24 24" fill="#1DB954">
+                    <path
+                        d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.479 1.56-.3.421-1.02.599-1.559.3z" />
+                </svg>
+                <h1>Spotify OBS Overlay</h1>
+            </div>
+
+            <div id="login-section" class="login-section">
+                <p class="description">Connect your Spotify account to display your currently playing songs in OBS</p>
+                <button id="loginBtn" class="spotify-btn">
+
+                    Login with Spotify
+                </button>
+                <div id="error-message" class="error-message" style="display: none;"></div>
+            </div>
+
+            <div id="widget-section" class="widget-section" style="display: none;">
+                <!-- <div class="success-message">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="#1DB954">
+                        <path
+                            d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                    </svg>
+                    <h2>Successfully Connected!</h2>
+                    <p>Your widget is ready to use in OBS</p>
+                </div> -->
+
+                <div class="widget-info">
+                    <label>Widget URL (Copy this for OBS Browser Source):</label>
+                    <div class="url-input-group">
+                        <input type="text" id="widgetUrl" readonly value="">
+                        <button id="copyBtn" class="copy-btn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
+                            </svg>
+                            Copy
+                        </button>
+                    </div>
+                    <div id="copy-success" class="copy-success" style="display: none;">
+                        ✓ URL copied to clipboard!
+                    </div>
+                </div>
+
+                <div class="style-selector">
+                    <h3>Choose Widget Style:</h3>
+                    <div class="style-options">
+                        <div class="style-option" data-style="default">
+                            <div class="style-preview default"></div>
+                            <span>Default</span>
+                        </div>
+                        <div class="style-option active" data-style="horizontal">
+                            <div class="style-preview horizontal"></div>
+                            <span>Horizontal</span>
+                        </div>
+                        <div class="style-option" data-style="retro">
+                            <div class="style-preview retro"></div>
+                            <span>Retro</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="advanced-settings">
+                    <div class="advanced-settings-header" id="advancedSettingsToggle">
+                        <h3>Advanced Settings</h3>
+                        <svg class="toggle-icon" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2">
+                            <path d="M6 9l6 6 6-6" />
+                        </svg>
+                    </div>
+                    <div class="advanced-settings-content" id="advancedSettingsContent">
+                        <div class="overlay-settings">
+                            <h3>Overlay Settings:</h3>
+                            <div class="settings-grid">
+                                <label class="setting-checkbox">
+                                    <input type="checkbox" id="showSongName" checked>
+                                    <span class="checkmark"></span>
+                                    <span class="label-text">Song Name</span>
+                                </label>
+                                <label class="setting-checkbox">
+                                    <input type="checkbox" id="showArtistName" checked>
+                                    <span class="checkmark"></span>
+                                    <span class="label-text">Artist Name</span>
+                                </label>
+                                <label class="setting-checkbox">
+                                    <input type="checkbox" id="showProgressBar" checked>
+                                    <span class="checkmark"></span>
+                                    <span class="label-text">Progress Bar</span>
+                                </label>
+                                <label class="setting-checkbox">
+                                    <input type="checkbox" id="showSpotifyBadge" checked>
+                                    <span class="checkmark"></span>
+                                    <span class="label-text">Spotify Badge</span>
+                                </label>
+                                <label class="setting-checkbox">
+                                    <input type="checkbox" id="showSongCover" checked>
+                                    <span class="checkmark"></span>
+                                    <span class="label-text">Song Cover</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="background-settings">
+                            <h3>Background Style:</h3>
+                            <div class="background-options">
+                                <label class="background-option">
+                                    <input type="radio" name="backgroundStyle" value="transparent">
+                                    <span>Transparent</span>
+                                </label>
+                                <label class="background-option">
+                                    <input type="radio" name="backgroundStyle" value="solid">
+                                    <span>Solid Color</span>
+                                </label>
+                                <label class="background-option">
+                                    <input type="radio" name="backgroundStyle" value="liquid-glass" checked>
+                                    <span>Liquid Glass</span>
+                                </label>
+                            </div>
+                            <div id="solid-color-controls" class="solid-color-controls" style="display: none;">
+                                <div class="color-control-group">
+                                    <label for="backgroundColor">Background Color:</label>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="color" id="backgroundColor" value="#000000">
+                                        <label class="setting-checkbox" style="margin: 0;">
+                                            <input type="checkbox" id="useAccentForBackground">
+                                            <span class="checkmark"></span>
+                                            <span class="label-text">Use Track Color</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="color-control-group">
+                                    <label for="backgroundOpacity">
+                                        Opacity: <span id="opacityValue">100</span>%
+                                    </label>
+                                    <input type="range" id="backgroundOpacity" min="0" max="100" value="85">
+                                </div>
+                            </div>
+                            <div id="liquid-glass-controls" class="liquid-glass-controls">
+                                <div class="color-control-group">
+                                    <label for="glassTint">Glass Tint:</label>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="color" id="glassTint" value="#ffffff">
+                                        <label class="setting-checkbox" style="margin: 0;">
+                                            <input type="checkbox" id="useAccentForGlassTint" checked>
+                                            <span class="checkmark"></span>
+                                            <span class="label-text">Use Track Color</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="color-control-group">
+                                    <label for="glassOpacity">
+                                        Tint Opacity: <span id="glassOpacityValue">70</span>%
+                                    </label>
+                                    <input type="range" id="glassOpacity" min="0" max="100" value="70">
+                                </div>
+                                <div class="color-control-group">
+                                    <label for="blurAmount">
+                                        Blur Amount: <span id="blurAmountValue">10</span>px
+                                    </label>
+                                    <input type="range" id="blurAmount" min="0" max="100" value="10">
+                                </div>
+                            </div>
+                            <div class="preview-section">
+                                <p class="preview-label">Preview:</p>
+                                <div class="background-preview">
+                                    <p class="preview-text">Sample Text</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="text-style-settings">
+                            <h3>Text Style & Effects:</h3>
+                            <div class="preview-section">
+                                <p class="preview-label">Preview:</p>
+                                <div id="textStylePreview" class="text-style-preview">
+                                    <p>Sample Song Name</p>
+                                    <p>Sample Artist</p>
+                                </div>
+                            </div>
+                            <div class="color-control-group">
+                                <label for="textColor">Text Color:</label>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <input type="color" id="textColor" value="#ffffff">
+                                    <label class="setting-checkbox" style="margin: 0;">
+                                        <input type="checkbox" id="useAccentForText">
+                                        <span class="checkmark"></span>
+                                        <span class="label-text">Use Track Color</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="checkbox-group">
+                                <label class="setting-checkbox">
+                                    <input type="checkbox" id="enableTextShadow" checked>
+                                    <span class="checkmark"></span>
+                                    <span class="label-text">Text Shadow</span>
+                                </label>
+                                <label class="setting-checkbox">
+                                    <input type="checkbox" id="enableTextGlow">
+                                    <span class="checkmark"></span>
+                                    <span class="label-text">Text Glow</span>
+                                </label>
+                            </div>
+                            <div id="textShadowControls" class="sub-controls">
+                                <div class="color-control-group">
+                                    <label for="textShadowColor">Shadow Color:</label>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="color" id="textShadowColor" value="#000000">
+                                        <label class="setting-checkbox" style="margin: 0;">
+                                            <input type="checkbox" id="useAccentForShadow" checked>
+                                            <span class="checkmark"></span>
+                                            <span class="label-text">Use Track Color</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="textGlowControls" class="sub-controls" style="display: none;">
+                                <div class="color-control-group">
+                                    <label for="textGlowColor">Glow Color:</label>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <input type="color" id="textGlowColor" value="#1DB954">
+                                        <label class="setting-checkbox" style="margin: 0;">
+                                            <input type="checkbox" id="useAccentForGlow">
+                                            <span class="checkmark"></span>
+                                            <span class="label-text">Use Track Color</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="border-settings">
+                            <h3>Border Settings:</h3>
+                            <div class="preview-section">
+                                <p class="preview-label">Preview:</p>
+                                <div id="borderPreview" class="border-preview">
+                                    <div class="border-preview-content">
+                                        <p>Sample Content</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <label class="setting-checkbox">
+                                <input type="checkbox" id="enableBorder">
+                                <span class="checkmark"></span>
+                                <span class="label-text">Enable Border</span>
+                            </label>
+                            <div id="borderControls" class="border-controls" style="display: none;">
+                                <div class="background-options">
+                                    <label class="background-option">
+                                        <input type="radio" name="borderStyle" value="solid" checked>
+                                        <span>Solid Color</span>
+                                    </label>
+                                    <label class="background-option">
+                                        <input type="radio" name="borderStyle" value="gradient">
+                                        <span>Gradient</span>
+                                    </label>
+                                </div>
+                                <div id="borderSolidControls">
+                                    <div class="color-control-group">
+                                        <label for="borderColor">Border Color:</label>
+                                        <div style="display: flex; gap: 10px; align-items: center;">
+                                            <input type="color" id="borderColor" value="#ffffff">
+                                            <label class="setting-checkbox" style="margin: 0;">
+                                                <input type="checkbox" id="useAccentForBorder">
+                                                <span class="checkmark"></span>
+                                                <span class="label-text">Use Track Color</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="borderGradientControls" style="display: none;">
+                                    <div class="color-control-group">
+                                        <label for="borderGradientColor1">Gradient Color 1:</label>
+                                        <div style="display: flex; gap: 10px; align-items: center;">
+                                            <input type="color" id="borderGradientColor1" value="#1DB954">
+                                            <label class="setting-checkbox" style="margin: 0;">
+                                                <input type="checkbox" id="useAccentForGradient1">
+                                                <span class="checkmark"></span>
+                                                <span class="label-text">Use Track Color</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="color-control-group">
+                                        <label for="borderGradientColor2">Gradient Color 2:</label>
+                                        <div style="display: flex; gap: 10px; align-items: center;">
+                                            <input type="color" id="borderGradientColor2" value="#ffffff">
+                                            <label class="setting-checkbox" style="margin: 0;">
+                                                <input type="checkbox" id="useAccentForGradient2">
+                                                <span class="checkmark"></span>
+                                                <span class="label-text">Use Track Color</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="instructions">
+                    <h3>How to use in OBS:</h3>
+                    <ol>
+                        <li>Open OBS Studio</li>
+                        <li>Add a new source → <strong>Browser Source</strong></li>
+                        <li>Paste the widget URL above</li>
+                        <li>Set width: <strong>800px</strong> and height: <strong>600px</strong></li>
+                        <li>Check <strong>"Shutdown source when not visible"</strong></li>
+                        <li>Click OK and position as needed</li>
+                    </ol>
+                </div>
+
+                <button id="previewBtn" class="secondary-btn" style="margin-top: 20px;">
+                    Preview Widget
+                </button>
+
+                <button id="logoutBtn" class="logout-btn">
+                    Disconnect Spotify
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

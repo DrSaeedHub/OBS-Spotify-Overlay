@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /widget.html
+Disallow: /api/
+
+Sitemap: https://obs-spotify-overlay.onrender.com/sitemap.xml
