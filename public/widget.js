@@ -34,6 +34,9 @@ let currentAccentColor = null;
 let colorThief = null;
 let isRefreshingToken = false;
 let notPlayingTimeout = null;
+let overlayIdleState = 'playing'; // 'playing' | 'idleVisible' | 'idleHidden' | 'error'
+let lastProgressValue = null;
+let stagnantProgressCount = 0;
 
 // Initialize
 window.addEventListener('DOMContentLoaded', async () => {
@@ -490,8 +493,31 @@ async function fetchCurrentTrack() {
         const data = await response.json();
 
         if (data.isPlaying && data.track) {
+            const progress = data.track.progress;
+            if (typeof progress === 'number') {
+                if (progress === lastProgressValue) {
+                    stagnantProgressCount += 1;
+                    if (stagnantProgressCount >= 3) {
+                        console.log('Progress unchanged across 3 polls, treating as not playing.');
+                        stagnantProgressCount = 0;
+                        lastProgressValue = null;
+                        currentTrackData = null;
+                        showNotPlaying();
+                        return;
+                    }
+                } else {
+                    stagnantProgressCount = 0;
+                    lastProgressValue = progress;
+                }
+            } else {
+                stagnantProgressCount = 0;
+                lastProgressValue = null;
+            }
+
             displayTrack(data.track);
         } else {
+            stagnantProgressCount = 0;
+            lastProgressValue = null;
             showNotPlaying();
         }
     } catch (error) {
@@ -652,6 +678,13 @@ function displayTrack(track) {
     }
 
     currentTrackData = track;
+    overlayIdleState = 'playing';
+    stagnantProgressCount = 0;
+    if (typeof track.progress === 'number') {
+        lastProgressValue = track.progress;
+    } else {
+        lastProgressValue = null;
+    }
 
     // Update progress bar if track is playing
     if (track.isPlaying && track.progress !== undefined && track.duration !== undefined) {
@@ -804,6 +837,17 @@ function showNotPlaying() {
         notPlayingTimeout = null;
     }
 
+    if (overlayIdleState === 'idleHidden') {
+        hideOverlay();
+        return;
+    }
+
+    if (overlayIdleState === 'idleVisible') {
+        return;
+    }
+
+    overlayIdleState = 'idleVisible';
+
     if (widgetContainer) {
         widgetContainer.style.display = 'flex';
     }
@@ -817,13 +861,9 @@ function showNotPlaying() {
     notPlaying.style.display = 'flex';
 
     notPlayingTimeout = setTimeout(() => {
-        notPlaying.style.display = 'none';
-        if (widgetContent) {
-            widgetContent.style.display = 'none';
-        }
-        if (widgetContainer) {
-            widgetContainer.style.display = 'none';
-        }
+        overlayIdleState = 'idleHidden';
+        hideOverlay();
+        notPlayingTimeout = null;
     }, 5000);
 }
 
@@ -840,6 +880,8 @@ function showError(message) {
         notPlayingTimeout = null;
     }
 
+    overlayIdleState = 'error';
+
     if (widgetContainer) {
         widgetContainer.style.display = 'flex';
     }
@@ -853,6 +895,20 @@ function showError(message) {
     errorDisplay.style.display = 'flex';
 
     errorMessage.textContent = message;
+}
+
+function hideOverlay() {
+    loading.style.display = 'none';
+    trackDisplay.style.display = 'none';
+    notPlaying.style.display = 'none';
+    errorDisplay.style.display = 'none';
+
+    if (widgetContent) {
+        widgetContent.style.display = 'none';
+    }
+    if (widgetContainer) {
+        widgetContainer.style.display = 'none';
+    }
 }
 
 function applyAccentColors() {
