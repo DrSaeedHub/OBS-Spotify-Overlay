@@ -1,4 +1,6 @@
 // DOM Elements
+const widgetContainer = document.querySelector('.widget-container');
+const widgetContent = document.getElementById('widget-content');
 const loading = document.getElementById('loading');
 const trackDisplay = document.getElementById('track-display');
 const notPlaying = document.getElementById('not-playing');
@@ -19,6 +21,8 @@ const progressFill = document.getElementById('progress-fill');
 // State
 let refreshInterval;
 let progressInterval;
+let nearEndTimeout = null;
+let nearEndInterval = null;
 let currentTrackData = null;
 let accessToken = null;
 let refreshToken = null;
@@ -29,6 +33,7 @@ let trackProgress = null;
 let currentAccentColor = null;
 let colorThief = null;
 let isRefreshingToken = false;
+let notPlayingTimeout = null;
 
 // Initialize
 window.addEventListener('DOMContentLoaded', async () => {
@@ -162,6 +167,7 @@ function updateProgress() {
     const now = Date.now();
     const elapsed = now - trackStartTime;
     const currentProgress = trackProgress + elapsed;
+    const remaining = Math.max(trackDuration - currentProgress, 0);
 
     // Update progress bar
     const progressPercentage = Math.min((currentProgress / trackDuration) * 100, 100);
@@ -171,10 +177,15 @@ function updateProgress() {
     currentTimeElement.textContent = formatTime(currentProgress);
     totalTimeElement.textContent = formatTime(trackDuration);
 
+    if (remaining <= 3000) {
+        startNearEndPolling();
+    }
+
     // Stop updating if track is finished
     if (currentProgress >= trackDuration) {
         clearInterval(progressInterval);
         progressInterval = null;
+        stopNearEndPolling();
     }
 }
 
@@ -183,16 +194,57 @@ function startProgressTracking(progress, duration) {
     if (progressInterval) {
         clearInterval(progressInterval);
     }
+    stopNearEndPolling();
 
     trackStartTime = Date.now();
     trackDuration = duration;
     trackProgress = progress;
+    scheduleNearEndCheck(duration, progress);
 
     // Update immediately
     updateProgress();
 
     // Update every second
     progressInterval = setInterval(updateProgress, 1000);
+}
+
+function scheduleNearEndCheck(duration, progress) {
+    if (!duration || progress === undefined) return;
+
+    const remaining = duration - progress;
+
+    if (nearEndTimeout) {
+        clearTimeout(nearEndTimeout);
+        nearEndTimeout = null;
+    }
+
+    if (remaining <= 3000) {
+        startNearEndPolling();
+    } else {
+        nearEndTimeout = setTimeout(() => {
+            startNearEndPolling();
+        }, remaining - 3000);
+    }
+}
+
+function startNearEndPolling() {
+    if (nearEndInterval) return;
+    console.log('Entering near-end polling mode (1s interval)');
+    nearEndInterval = setInterval(() => {
+        fetchCurrentTrack();
+    }, 1000);
+}
+
+function stopNearEndPolling() {
+    if (nearEndTimeout) {
+        clearTimeout(nearEndTimeout);
+        nearEndTimeout = null;
+    }
+    if (nearEndInterval) {
+        clearInterval(nearEndInterval);
+        nearEndInterval = null;
+        console.log('Exiting near-end polling mode');
+    }
 }
 
 function getAccessToken() {
@@ -396,9 +448,13 @@ async function fetchCurrentTrack() {
         // Check if token needs refreshing before making the request
         if (shouldRefreshToken() && !isRefreshingToken) {
             console.log('Token expired or missing, refreshing...');
-            await refreshAccessToken();
-            if (!accessToken) {
-                showError('Session expired. Please login again.');
+            const refreshed = await refreshAccessToken();
+            if (!refreshed) {
+                if (!accessToken) {
+                    showError('No access token available');
+                } else {
+                    console.log('Token refresh failed, will retry soon without interrupting display');
+                }
                 return;
             }
         }
@@ -513,8 +569,7 @@ async function refreshAccessToken() {
                 accessToken = null;
                 refreshToken = null;
                 tokenExpiresAt = null;
-                isRefreshingToken = false;
-                return;
+                return false;
             }
 
             throw new Error(`Failed to refresh token: ${response.status}`);
@@ -568,24 +623,12 @@ async function refreshAccessToken() {
         }
 
         console.log('Token refreshed successfully');
+        return true;
     } catch (error) {
         console.error('Error refreshing token:', error);
-        showError('Failed to refresh session. Please login again.');
-
-        // Clear potentially invalid tokens from variables
-        accessToken = null;
-        refreshToken = null;
-        tokenExpiresAt = null;
-
-        // Also clear localStorage to force fresh login
-        try {
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
-            localStorage.removeItem('expires_at');
-            console.log('Cleared invalid tokens from localStorage');
-        } catch (e) {
-            console.log('Could not clear localStorage');
-        }
+        // Keep existing tokens for transient errors and retry soon
+        tokenExpiresAt = Date.now();
+        return false;
     } finally {
         isRefreshingToken = false;
     }
@@ -619,12 +662,25 @@ function displayTrack(track) {
             clearInterval(progressInterval);
             progressInterval = null;
         }
+        stopNearEndPolling();
         progressFill.style.width = '0%';
         currentTimeElement.textContent = '0:00';
         totalTimeElement.textContent = track.duration ? formatTime(track.duration) : '0:00';
     }
 
     // Show track display
+    if (notPlayingTimeout) {
+        clearTimeout(notPlayingTimeout);
+        notPlayingTimeout = null;
+    }
+
+    if (widgetContainer) {
+        widgetContainer.style.display = 'flex';
+    }
+    if (widgetContent) {
+        widgetContent.style.display = 'block';
+    }
+
     loading.style.display = 'none';
     notPlaying.style.display = 'none';
     errorDisplay.style.display = 'none';
@@ -741,11 +797,34 @@ function showNotPlaying() {
         clearInterval(progressInterval);
         progressInterval = null;
     }
+    stopNearEndPolling();
+
+    if (notPlayingTimeout) {
+        clearTimeout(notPlayingTimeout);
+        notPlayingTimeout = null;
+    }
+
+    if (widgetContainer) {
+        widgetContainer.style.display = 'flex';
+    }
+    if (widgetContent) {
+        widgetContent.style.display = 'block';
+    }
 
     loading.style.display = 'none';
     trackDisplay.style.display = 'none';
     errorDisplay.style.display = 'none';
     notPlaying.style.display = 'flex';
+
+    notPlayingTimeout = setTimeout(() => {
+        notPlaying.style.display = 'none';
+        if (widgetContent) {
+            widgetContent.style.display = 'none';
+        }
+        if (widgetContainer) {
+            widgetContainer.style.display = 'none';
+        }
+    }, 5000);
 }
 
 function showError(message) {
@@ -753,6 +832,19 @@ function showError(message) {
     if (progressInterval) {
         clearInterval(progressInterval);
         progressInterval = null;
+    }
+    stopNearEndPolling();
+
+    if (notPlayingTimeout) {
+        clearTimeout(notPlayingTimeout);
+        notPlayingTimeout = null;
+    }
+
+    if (widgetContainer) {
+        widgetContainer.style.display = 'flex';
+    }
+    if (widgetContent) {
+        widgetContent.style.display = 'block';
     }
 
     loading.style.display = 'none';
