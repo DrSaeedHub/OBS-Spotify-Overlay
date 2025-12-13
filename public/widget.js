@@ -41,6 +41,21 @@ let overlayIdleState = 'playing'; // 'playing' | 'idleVisible' | 'idleHidden' | 
 let lastProgressValue = null;
 let stagnantProgressCount = 0;
 
+// Check for RemoveChache parameter and clear localStorage if present
+// This must run before any localStorage reads
+(function() {
+    try {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('RemoveChache') === 'True') {
+            localStorage.clear();
+            console.log('localStorage cleared due to RemoveChache=True parameter');
+        }
+    } catch (e) {
+        // localStorage might not be available (e.g., in OBS Browser Source)
+        // This is fine, just continue
+    }
+})();
+
 // Initialize
 window.addEventListener('DOMContentLoaded', async () => {
     getAccessToken();
