@@ -152,9 +152,9 @@ Enable "Use Track Color" for any element to automatically apply the dominant col
 ## How It Works
 
 1. **Authentication**: Uses Spotify OAuth 2.0 with PKCE (Proof Key for Code Exchange) for secure authentication
-2. **Real-time Updates**: Polls Spotify API every 5 seconds for the current track
+2. **Real-time Updates**: Polls Spotify API every 10 seconds by default (`refreshSeconds` or `refreshMs` URL params to change it)
 3. **Dynamic Theming**: Extracts dominant colors from album artwork using the ColorThief library
-4. **Progress Tracking**: Local progress calculation based on API timestamps
+4. **Progress Tracking**: Local progress calculation based on API timestamps (auto-hides if API progress is stagnant for 5 polls)
 5. **Token Management**: Automatic token refresh before expiration
 
 ## API Endpoints

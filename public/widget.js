@@ -40,6 +40,8 @@ let notPlayingTimeout = null;
 let overlayIdleState = 'playing'; // 'playing' | 'idleVisible' | 'idleHidden' | 'error'
 let lastProgressValue = null;
 let stagnantProgressCount = 0;
+const DEFAULT_TRACK_POLL_INTERVAL_MS = 10000;
+const DEFAULT_STAGNANT_PROGRESS_LIMIT = 5;
 
 // Check for RemoveChache parameter and clear localStorage if present
 // This must run before any localStorage reads
@@ -55,6 +57,28 @@ let stagnantProgressCount = 0;
         // This is fine, just continue
     }
 })();
+
+function getTrackPollIntervalMs() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const secondsParam = urlParams.get('refreshSeconds') || urlParams.get('refreshInterval');
+    const msParam = urlParams.get('refreshMs');
+
+    if (msParam) {
+        const parsedMs = Number(msParam);
+        if (Number.isFinite(parsedMs) && parsedMs > 0) {
+            return Math.max(1000, Math.floor(parsedMs));
+        }
+    }
+
+    if (secondsParam) {
+        const parsedSeconds = Number(secondsParam);
+        if (Number.isFinite(parsedSeconds) && parsedSeconds > 0) {
+            return Math.max(1000, Math.floor(parsedSeconds * 1000));
+        }
+    }
+
+    return DEFAULT_TRACK_POLL_INTERVAL_MS;
+}
 
 // Initialize
 window.addEventListener('DOMContentLoaded', async () => {
@@ -99,8 +123,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Start fetching track data
     fetchCurrentTrack();
-    // Refresh every 5 seconds
-    refreshInterval = setInterval(fetchCurrentTrack, 5000);
+    const pollIntervalMs = getTrackPollIntervalMs();
+    console.log(`Polling track state every ${pollIntervalMs}ms`);
+    refreshInterval = setInterval(fetchCurrentTrack, pollIntervalMs);
 
     // Proactive token refresh - check every 30 seconds and refresh 5 minutes before expiration
     setInterval(async () => {
@@ -526,12 +551,12 @@ async function fetchCurrentTrack() {
             if (typeof progress === 'number') {
                 if (progress === lastProgressValue) {
                     stagnantProgressCount += 1;
-                    if (stagnantProgressCount >= 3) {
-                        console.log('Progress unchanged across 3 polls, treating as not playing.');
+                    if (stagnantProgressCount >= DEFAULT_STAGNANT_PROGRESS_LIMIT) {
+                        console.log(`Progress unchanged across ${DEFAULT_STAGNANT_PROGRESS_LIMIT} polls, hiding overlay until playback resumes.`);
                         stagnantProgressCount = 0;
                         lastProgressValue = null;
                         currentTrackData = null;
-                        showNotPlaying();
+                        enterIdleHiddenState();
                         return;
                     }
                 } else {
@@ -700,6 +725,29 @@ function displayTrack(track) {
     const trackChanged = !currentTrackData || currentTrackData.id !== track.id;
 
     if (!trackChanged && track.isPlaying) {
+        // Same track; make sure the overlay is visible (it might have been hidden while idle)
+        if (notPlayingTimeout) {
+            clearTimeout(notPlayingTimeout);
+            notPlayingTimeout = null;
+        }
+
+        overlayIdleState = 'playing';
+        stagnantProgressCount = 0;
+        if (typeof track.progress === 'number') {
+            lastProgressValue = track.progress;
+        }
+
+        if (widgetContainer) {
+            widgetContainer.style.display = 'flex';
+        }
+        if (widgetContent) {
+            widgetContent.style.display = 'block';
+        }
+        loading.style.display = 'none';
+        notPlaying.style.display = 'none';
+        errorDisplay.style.display = 'none';
+        trackDisplay.style.display = 'flex';
+
         // Same track, just update progress if needed
         if (track.progress !== undefined && track.duration !== undefined) {
             startProgressTracking(track.progress, track.duration);
@@ -896,8 +944,7 @@ function showNotPlaying() {
     notPlaying.style.display = 'flex';
 
     notPlayingTimeout = setTimeout(() => {
-        overlayIdleState = 'idleHidden';
-        hideOverlay();
+        enterIdleHiddenState();
         notPlayingTimeout = null;
     }, 5000);
 }
@@ -930,6 +977,23 @@ function showError(message) {
     errorDisplay.style.display = 'flex';
 
     errorMessage.textContent = message;
+}
+
+function enterIdleHiddenState() {
+    // Clear progress tracking
+    if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+    }
+    stopNearEndPolling();
+
+    if (notPlayingTimeout) {
+        clearTimeout(notPlayingTimeout);
+        notPlayingTimeout = null;
+    }
+
+    overlayIdleState = 'idleHidden';
+    hideOverlay();
 }
 
 function hideOverlay() {
