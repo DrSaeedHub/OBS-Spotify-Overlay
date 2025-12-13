@@ -211,10 +211,10 @@ OBS-Spotify-Overlay/
    - **Environment**: Node
    - **Build Command**: `npm install`
    - **Start Command**: `npm start`
-6. Go to **"Environment"** tab and add:
+   6. Go to **"Environment"** tab and add:
    - `BASE_URL` - https://your-app-name.onrender.com
    - `SPOTIFY_CLIENT_ID` - Your Spotify Client ID
-   - `SPOTIFY_CLIENT_SECRET` - Your Spotify Client Secret (optional - your app uses client_id for refresh)
+   - `SPOTIFY_CLIENT_SECRET` - Optional (not required for PKCE)
    - `REDIRECT_URI` - https://your-app-name.onrender.com/auth/callback
    - `PORT` - Leave empty (Render sets it automatically)
 7. Click **"Create Web Service"**
@@ -347,4 +347,3 @@ For issues and feature requests, please open an issue on GitHub.
 ---
 
 Made with ❤️ for streamers and music lovers
-

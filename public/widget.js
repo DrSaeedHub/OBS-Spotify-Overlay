@@ -33,6 +33,9 @@ let trackProgress = null;
 let currentAccentColor = null;
 let colorThief = null;
 let isRefreshingToken = false;
+let refreshPromise = null;
+let refreshRetryAt = 0;
+let refreshFailureCount = 0;
 let notPlayingTimeout = null;
 let overlayIdleState = 'playing'; // 'playing' | 'idleVisible' | 'idleHidden' | 'error'
 let lastProgressValue = null;
@@ -64,7 +67,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // If we have refresh_token, we can always get a new access_token
     // So check if current token is expired or missing, and refresh immediately if needed
-    if (refreshToken && (!accessToken || shouldRefreshToken()) && !isRefreshingToken) {
+    if (refreshToken && (!accessToken || shouldRefreshToken())) {
         console.log('Getting or refreshing access token on startup...');
         await refreshAccessToken();
     }
@@ -86,7 +89,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // Proactive token refresh - check every 30 seconds and refresh 5 minutes before expiration
     setInterval(async () => {
-        if (shouldRefreshToken() && !isRefreshingToken) {
+        if (shouldRefreshToken()) {
             console.log('Proactive token refresh check - refreshing token before expiration');
             await refreshAccessToken();
             // After refreshing, fetch current track with new token
@@ -307,7 +310,9 @@ function isTokenExpired() {
 }
 
 function shouldRefreshToken() {
-    return refreshToken && (isTokenExpired() || !accessToken);
+    if (!refreshToken) return false;
+    if (refreshRetryAt && Date.now() < refreshRetryAt) return false;
+    return isTokenExpired() || !accessToken;
 }
 
 function applyStyle() {
@@ -449,7 +454,7 @@ function applySettings() {
 async function fetchCurrentTrack() {
     try {
         // Check if token needs refreshing before making the request
-        if (shouldRefreshToken() && !isRefreshingToken) {
+        if (shouldRefreshToken()) {
             console.log('Token expired or missing, refreshing...');
             const refreshed = await refreshAccessToken();
             if (!refreshed) {
@@ -467,23 +472,32 @@ async function fetchCurrentTrack() {
             return;
         }
 
-        const response = await fetch('/api/current-track', {
-            headers: {
-                'Authorization': `Bearer ${accessToken}`
-            }
-        });
+        const makeRequest = async () =>
+            fetch('/api/current-track', {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
+
+        let response = await makeRequest();
 
         if (response.status === 401) {
-            // Token expired, try to refresh
             console.log('Received 401, attempting token refresh...');
-            await refreshAccessToken();
-            if (accessToken) {
-                // Retry the request with new token
-                return await fetchCurrentTrack();
-            } else {
-                showError('Session expired. Please login again.');
-                return;
+            const refreshed = await refreshAccessToken();
+            if (refreshed && accessToken) {
+                response = await makeRequest();
             }
+        }
+
+        if (response.status === 401) {
+            if (!refreshToken) {
+                showError('Session expired. Please login again.');
+            } else if (refreshRetryAt && Date.now() < refreshRetryAt) {
+                showError('Reconnecting to Spotify...');
+            } else {
+                showError('Unable to refresh Spotify session. Retrying...');
+            }
+            return;
         }
 
         if (!response.ok) {
@@ -526,137 +540,143 @@ async function fetchCurrentTrack() {
     }
 }
 
-async function refreshAccessToken() {
-    if (isRefreshingToken) {
+async function refreshAccessToken(options = {}) {
+    return refreshAccessTokenWithOptions({ force: options.force === true });
+}
+
+function getRefreshBackoffMs(failureCount) {
+    const cappedFailures = Math.min(6, failureCount);
+    const base = Math.min(60000, 1000 * Math.pow(2, cappedFailures)); // 1s, 2s, 4s ... up to 60s
+    const jitter = Math.floor(Math.random() * 250);
+    return base + jitter;
+}
+
+async function refreshAccessTokenWithOptions({ force }) {
+    if (refreshPromise) {
         console.log('Token refresh already in progress, waiting...');
-        return;
+        return refreshPromise;
     }
 
-    isRefreshingToken = true;
+    if (refreshRetryAt && Date.now() < refreshRetryAt) {
+        return false;
+    }
 
-    try {
-        // Priority: Always check URL first (for OBS where localStorage isn't available)
-        // Then check variable, then localStorage
-        let storedRefreshToken = null;
+    refreshPromise = (async () => {
+        isRefreshingToken = true;
 
-        // First: Check URL parameters (most reliable for OBS Browser Source)
-        const urlParams = new URLSearchParams(window.location.search);
-        storedRefreshToken = urlParams.get('refresh_token');
+        try {
+            // Priority: Always check URL first (for OBS where localStorage isn't available)
+            // Then check variable, then localStorage
+            let storedRefreshToken = null;
 
-        // Second: Check our variable (might have been set from URL on load)
-        if (!storedRefreshToken && refreshToken) {
-            storedRefreshToken = refreshToken;
-        }
+            // First: Check URL parameters (most reliable for OBS Browser Source)
+            const urlParams = new URLSearchParams(window.location.search);
+            storedRefreshToken = urlParams.get('refresh_token');
 
-        // Third: Try localStorage (for same-origin scenarios)
-        if (!storedRefreshToken) {
-            try {
-                storedRefreshToken = localStorage.getItem('refresh_token');
-            } catch (e) {
-                // Can't access localStorage (OBS Browser Source scenario - this is normal)
-                console.log('Cannot access localStorage (normal in OBS Browser Source)');
+            // Second: Check our variable (might have been set from URL on load)
+            if (!storedRefreshToken && refreshToken) {
+                storedRefreshToken = refreshToken;
             }
-        }
 
-        if (!storedRefreshToken) {
-            console.error('No refresh token available');
-            showError('Session expired. Please login again.');
-            isRefreshingToken = false;
-            return;
-        }
-
-        // Store refresh token in variable for future use
-        refreshToken = storedRefreshToken;
-
-        console.log('Attempting to refresh access token...');
-        const response = await fetch('/api/refresh-token', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ refresh_token: storedRefreshToken })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error('Token refresh failed:', response.status, errorData);
-
-            if (response.status === 400 || response.status === 401) {
-                // Refresh token is invalid or expired
-                showError('Session expired. Please login again.');
-                // Clear invalid tokens
+            // Third: Try localStorage (for same-origin scenarios)
+            if (!storedRefreshToken) {
                 try {
-                    localStorage.removeItem('access_token');
-                    localStorage.removeItem('refresh_token');
-                    localStorage.removeItem('expires_at');
+                    storedRefreshToken = localStorage.getItem('refresh_token');
                 } catch (e) {
-                    // Ignore localStorage errors
+                    // Can't access localStorage (OBS Browser Source scenario - this is normal)
+                    console.log('Cannot access localStorage (normal in OBS Browser Source)');
                 }
-                accessToken = null;
-                refreshToken = null;
-                tokenExpiresAt = null;
+            }
+
+            if (!storedRefreshToken) {
+                console.error('No refresh token available');
+                showError('Session expired. Please login again.');
                 return false;
             }
 
-            throw new Error(`Failed to refresh token: ${response.status}`);
-        }
+            // Store refresh token in variable for future use
+            refreshToken = storedRefreshToken;
 
-        const data = await response.json();
-        accessToken = data.access_token;
+            console.log('Attempting to refresh access token...');
+            const response = await fetch('/api/refresh-token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ refresh_token: storedRefreshToken })
+            });
 
-        // Spotify may return a new refresh_token (preserve it if provided, otherwise keep existing)
-        if (data.refresh_token) {
-            refreshToken = data.refresh_token;
-        } else {
-            // Preserve existing refresh_token (important for OBS where it comes from URL)
-            // If we don't have one, try to get it from URL again
-            if (!refreshToken) {
-                const urlParams = new URLSearchParams(window.location.search);
-                refreshToken = urlParams.get('refresh_token');
-            }
-        }
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.error('Token refresh failed:', response.status, errorData);
 
-        // Update expiration time
-        if (data.expires_in) {
-            tokenExpiresAt = Date.now() + (data.expires_in * 1000);
-        } else {
-            // Default to 55 minutes if not provided
-            tokenExpiresAt = Date.now() + (55 * 60 * 1000);
-        }
+                if (response.status === 400 || response.status === 401) {
+                    // Refresh token is invalid or revoked
+                    showError('Session expired. Please login again.');
+                    try {
+                        localStorage.removeItem('access_token');
+                        localStorage.removeItem('refresh_token');
+                        localStorage.removeItem('expires_at');
+                    } catch (e) {
+                        // Ignore localStorage errors
+                    }
+                    accessToken = null;
+                    refreshToken = null;
+                    tokenExpiresAt = null;
+                    refreshRetryAt = 0;
+                    refreshFailureCount = 0;
+                    return false;
+                }
 
-        // Always try to save to localStorage (if available)
-        // This allows the widget to use localStorage as primary storage when available
-        // and only fall back to URL parameters when localStorage isn't accessible (OBS)
-        try {
-            localStorage.setItem('access_token', accessToken);
-            console.log('Saved new access_token to localStorage');
-
-            if (refreshToken) {
-                localStorage.setItem('refresh_token', refreshToken);
-                console.log('Saved refresh_token to localStorage');
-            }
-
-            if (tokenExpiresAt) {
-                localStorage.setItem('expires_at', tokenExpiresAt.toString());
-                console.log('Saved expires_at to localStorage');
+                throw new Error(`Failed to refresh token: ${response.status}`);
             }
 
-            console.log('Token data successfully saved to localStorage');
-        } catch (e) {
-            // Can't update localStorage (e.g., in OBS Browser Source with restricted permissions)
-            // This is okay - we'll continue using URL parameters as fallback
-            console.log('Cannot save to localStorage (normal in some OBS configurations). Using URL parameters as fallback.');
-        }
+            const data = await response.json();
+            if (!data?.access_token) {
+                throw new Error('Refresh response missing access_token');
+            }
 
-        console.log('Token refreshed successfully');
-        return true;
-    } catch (error) {
-        console.error('Error refreshing token:', error);
-        // Keep existing tokens for transient errors and retry soon
-        tokenExpiresAt = Date.now();
-        return false;
+            accessToken = data.access_token;
+
+            // Spotify may return a new refresh_token (preserve it if provided, otherwise keep existing)
+            if (data.refresh_token) {
+                refreshToken = data.refresh_token;
+            }
+
+            // Update expiration time
+            if (data.expires_in) {
+                tokenExpiresAt = Date.now() + (data.expires_in * 1000);
+            } else {
+                tokenExpiresAt = Date.now() + (55 * 60 * 1000);
+            }
+
+            // Always try to save to localStorage (if available)
+            try {
+                localStorage.setItem('access_token', accessToken);
+                if (refreshToken) localStorage.setItem('refresh_token', refreshToken);
+                if (tokenExpiresAt) localStorage.setItem('expires_at', tokenExpiresAt.toString());
+            } catch (e) {
+                console.log('Cannot save to localStorage (normal in some OBS configurations). Using URL parameters as fallback.');
+            }
+
+            refreshRetryAt = 0;
+            refreshFailureCount = 0;
+            console.log('Token refreshed successfully');
+            return true;
+        } catch (error) {
+            console.error('Error refreshing token:', error);
+            refreshFailureCount += 1;
+            refreshRetryAt = Date.now() + getRefreshBackoffMs(refreshFailureCount);
+            return false;
+        } finally {
+            isRefreshingToken = false;
+        }
+    })();
+
+    try {
+        return await refreshPromise;
     } finally {
-        isRefreshingToken = false;
+        refreshPromise = null;
     }
 }
 

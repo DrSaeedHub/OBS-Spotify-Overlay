@@ -9,6 +9,9 @@ const cookieParser = require('cookie-parser');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Support running behind reverse proxies (Render, Fly, etc.)
+app.set('trust proxy', 1);
+
 app.use(cors());
 app.use(cookieParser());
 app.use(express.json());
@@ -16,6 +19,14 @@ app.use(express.static('public'));
 
 // Store code verifiers temporarily (in production, use Redis or similar)
 const codeVerifiers = new Map();
+
+function isHttpsRequest(req) {
+    const forwardedProto = req.headers['x-forwarded-proto'];
+    if (typeof forwardedProto === 'string') {
+        return forwardedProto.split(',')[0].trim().toLowerCase() === 'https';
+    }
+    return req.secure === true;
+}
 
 // Generate PKCE code verifier and challenge
 function generatePKCE() {
@@ -45,19 +56,30 @@ app.get('/auth/login', (req, res) => {
     authUrl.searchParams.set('code_challenge', codeChallenge);
     authUrl.searchParams.set('code_challenge_method', 'S256');
 
-    // Store verifier with a session ID
-    const sessionId = crypto.randomBytes(16).toString('hex');
-    codeVerifiers.set(sessionId, codeVerifier);
+    // CSRF protection: bind PKCE verifier to a random state value stored in an HttpOnly cookie
+    const state = crypto.randomBytes(16).toString('hex');
+    authUrl.searchParams.set('state', state);
+    codeVerifiers.set(state, codeVerifier);
 
-    res.cookie('session_id', sessionId, { httpOnly: false });
+    res.cookie('spotify_auth_state', state, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: isHttpsRequest(req),
+        maxAge: 10 * 60 * 1000, // 10 minutes
+    });
     res.redirect(authUrl.toString());
 });
 
 // OAuth Callback - Handle Spotify redirect
 app.get('/auth/callback', async (req, res) => {
-    const { code } = req.query;
-    const sessionId = req.cookies?.session_id;
-    const codeVerifier = codeVerifiers.get(sessionId);
+    const { code, state } = req.query;
+    const cookieState = req.cookies?.spotify_auth_state;
+
+    if (!state || !cookieState || state !== cookieState) {
+        return res.redirect('/?error=authentication_failed');
+    }
+
+    const codeVerifier = codeVerifiers.get(state);
 
     if (!code || !codeVerifier) {
         return res.redirect('/?error=authentication_failed');
@@ -84,7 +106,8 @@ app.get('/auth/callback', async (req, res) => {
         const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
         // Clean up used verifier
-        codeVerifiers.delete(sessionId);
+        codeVerifiers.delete(state);
+        res.clearCookie('spotify_auth_state');
 
         // Redirect to main page with tokens
         const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
@@ -159,13 +182,16 @@ app.post('/api/refresh-token', async (req, res) => {
     }
 
     try {
+        const body = new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: refresh_token,
+            // PKCE (public clients) refresh uses client_id in the body
+            client_id: process.env.SPOTIFY_CLIENT_ID,
+        });
+
         const response = await axios.post(
             'https://accounts.spotify.com/api/token',
-            new URLSearchParams({
-                grant_type: 'refresh_token',
-                refresh_token: refresh_token,
-                client_id: process.env.SPOTIFY_CLIENT_ID,
-            }),
+            body,
             {
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -176,10 +202,19 @@ app.post('/api/refresh-token', async (req, res) => {
         res.json({
             access_token: response.data.access_token,
             expires_in: response.data.expires_in,
+            refresh_token: response.data.refresh_token,
         });
     } catch (error) {
-        console.error('Token refresh error:', error.response?.data || error.message);
-        res.status(500).json({ error: 'Failed to refresh token' });
+        const status = error.response?.status;
+        const data = error.response?.data;
+
+        // Spotify returns 400 invalid_grant when the refresh token is revoked/invalid.
+        if (status === 400 && data?.error === 'invalid_grant') {
+            return res.status(401).json({ error: 'invalid_grant' });
+        }
+
+        console.error('Token refresh error:', data || error.message);
+        res.status(status || 500).json({ error: data?.error || 'Failed to refresh token' });
     }
 });
 
