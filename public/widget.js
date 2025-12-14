@@ -623,7 +623,9 @@ async function fetchCurrentTrack() {
 
         const data = await response.json();
 
-        if (data.isPlaying && data.track) {
+        if (data.track) {
+            // track.isPlaying contains the actual Spotify playback state (true/false)
+            // data.isPlaying at root level is always true when there's a track
             displayTrack(data.track);
         } else {
             showNotPlaying();
@@ -785,18 +787,48 @@ function displayTrack(track) {
     // Check if track has changed
     const trackChanged = !currentTrackData || currentTrackData.id !== track.id;
     const isPlayingNow = track.isPlaying === true;
+    const wasPlaying = lastPlaybackIsPlaying === true;
+    const playbackStateChanged = wasPlaying !== isPlayingNow;
 
-    // If playback resumed, cancel any pending pause-hide timer
+    // If playback resumed, cancel any pending pause-hide timer and show the widget
     if (isPlayingNow) {
         lastPlaybackIsPlaying = true;
         if (pauseHideTimeout) {
             clearTimeout(pauseHideTimeout);
             pauseHideTimeout = null;
         }
+        if (notPlayingTimeout) {
+            clearTimeout(notPlayingTimeout);
+            notPlayingTimeout = null;
+        }
     }
 
-    if (!trackChanged && isPlayingNow) {
-        // Same track; make sure the overlay is visible (it might have been hidden while idle)
+    // Same track, no state change - just silently update progress without animations
+    if (!trackChanged && !playbackStateChanged && !overlayWasHidden) {
+        // Make sure overlay is visible
+        overlayIdleState = 'playing';
+
+        if (widgetContainer) {
+            widgetContainer.style.display = 'flex';
+        }
+        if (widgetContent) {
+            widgetContent.style.display = 'block';
+        }
+        loading.style.display = 'none';
+        notPlaying.style.display = 'none';
+        errorDisplay.style.display = 'none';
+        trackDisplay.style.display = 'flex';
+
+        // Same track playing - update progress
+        if (isPlayingNow && typeof track.progress === 'number' && typeof track.duration === 'number') {
+            startProgressTracking(track.progress, track.duration);
+        }
+        // Same track paused - keep progress frozen (do nothing, it's already static)
+        return;
+    }
+
+    // Same track, but coming back from hidden state - show without heavy animation
+    if (!trackChanged && overlayWasHidden) {
         if (notPlayingTimeout) {
             clearTimeout(notPlayingTimeout);
             notPlayingTimeout = null;
@@ -815,15 +847,16 @@ function displayTrack(track) {
         errorDisplay.style.display = 'none';
         trackDisplay.style.display = 'flex';
 
-        // Same track, just update progress if needed
-        if (typeof track.progress === 'number' && typeof track.duration === 'number') {
+        // Update progress based on current state
+        if (isPlayingNow && typeof track.progress === 'number' && typeof track.duration === 'number') {
             startProgressTracking(track.progress, track.duration);
+        } else if (typeof track.progress === 'number' && typeof track.duration === 'number') {
+            // Paused - set static progress
+            setStaticProgress(track.progress, track.duration);
         }
 
-        // Only animate when (re)entering the visible state.
-        if (overlayWasHidden || trackWasHidden) {
-            triggerFadeInAnimation(trackDisplay);
-        }
+        // Light fade-in when reappearing
+        triggerFadeInAnimation(trackDisplay);
         return;
     }
 
@@ -871,9 +904,9 @@ function displayTrack(track) {
                 return;
             }
 
-            // Only schedule (or reschedule) when entering pause or when the paused track changes
-            const wasPaused = lastPlaybackIsPlaying === false;
-            if (!wasPaused || trackChanged) {
+            // Schedule hide timeout when transitioning from playing to paused
+            // or when track changes while paused - restart the timer
+            if ((wasPlaying || trackChanged) && (!pauseHideTimeout || trackChanged)) {
                 if (pauseHideTimeout) {
                     clearTimeout(pauseHideTimeout);
                 }
@@ -891,6 +924,7 @@ function displayTrack(track) {
         lastPlaybackIsPlaying = false;
     } else {
         overlayIdleState = 'playing';
+        lastPlaybackIsPlaying = true;
 
         // Update progress bar if track is playing
         if (typeof track.progress === 'number' && typeof track.duration === 'number') {
