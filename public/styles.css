@@ -178,6 +178,18 @@ body {
     animation: fadeIn 0.3s ease;
 }
 
+.url-hint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.url-hint code {
+    font-family: 'Courier New', monospace;
+    color: var(--text-primary);
+}
+
 .instructions {
     background: var(--background-dark);
     border-radius: 12px;

@@ -109,12 +109,14 @@ app.get('/auth/callback', async (req, res) => {
         codeVerifiers.delete(state);
         res.clearCookie('spotify_auth_state');
 
-        // Redirect to main page with tokens
+        // Redirect to main page with tokens in the URL hash (not sent to the server)
         const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
         const redirectUrl = new URL(`${baseUrl}/`);
-        redirectUrl.searchParams.set('access_token', access_token);
-        redirectUrl.searchParams.set('refresh_token', refresh_token);
-        redirectUrl.searchParams.set('expires_in', expires_in);
+        redirectUrl.hash = new URLSearchParams({
+            access_token,
+            refresh_token,
+            expires_in: String(expires_in),
+        }).toString();
 
         res.redirect(redirectUrl.toString());
     } catch (error) {

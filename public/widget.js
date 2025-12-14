@@ -40,8 +40,12 @@ let notPlayingTimeout = null;
 let overlayIdleState = 'playing'; // 'playing' | 'idleVisible' | 'idleHidden' | 'error'
 let lastProgressValue = null;
 let stagnantProgressCount = 0;
+let lastPolledTrackId = null;
 const DEFAULT_TRACK_POLL_INTERVAL_MS = 10000;
 const DEFAULT_STAGNANT_PROGRESS_LIMIT = 5;
+const DEFAULT_PAUSE_HIDE_DELAY_MS = 5000;
+let pauseHideTimeout = null;
+let lastPlaybackIsPlaying = null;
 
 // Check for RemoveChache parameter and clear localStorage if present
 // This must run before any localStorage reads
@@ -80,6 +84,51 @@ function getTrackPollIntervalMs() {
     return DEFAULT_TRACK_POLL_INTERVAL_MS;
 }
 
+function getPauseHideDelayMs() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const secondsParam = urlParams.get('pauseHideSeconds');
+    const msParam = urlParams.get('pauseHideMs');
+
+    if (msParam) {
+        const parsedMs = Number(msParam);
+        if (Number.isFinite(parsedMs) && parsedMs >= 0) {
+            return Math.max(0, Math.floor(parsedMs));
+        }
+    }
+
+    if (secondsParam) {
+        const parsedSeconds = Number(secondsParam);
+        if (Number.isFinite(parsedSeconds) && parsedSeconds >= 0) {
+            return Math.max(0, Math.floor(parsedSeconds * 1000));
+        }
+    }
+
+    return DEFAULT_PAUSE_HIDE_DELAY_MS;
+}
+
+function isHideOnPauseEnabled() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const value = urlParams.get('hideOnPause');
+    if (value === null) return true;
+    return value !== 'false';
+}
+
+function setStaticProgress(progress, duration) {
+    if (!progressFill || !currentTimeElement || !totalTimeElement) return;
+
+    if (typeof duration !== 'number' || duration <= 0 || typeof progress !== 'number' || progress < 0) {
+        progressFill.style.width = '0%';
+        currentTimeElement.textContent = '0:00';
+        totalTimeElement.textContent = typeof duration === 'number' ? formatTime(duration) : '0:00';
+        return;
+    }
+
+    const progressPercentage = Math.min((progress / duration) * 100, 100);
+    progressFill.style.width = `${progressPercentage}%`;
+    currentTimeElement.textContent = formatTime(progress);
+    totalTimeElement.textContent = formatTime(duration);
+}
+
 // Initialize
 window.addEventListener('DOMContentLoaded', async () => {
     getAccessToken();
@@ -89,7 +138,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Ensure we have refresh_token - check URL as fallback if not in localStorage
     if (!refreshToken) {
         const urlParams = new URLSearchParams(window.location.search);
-        const urlRefreshToken = urlParams.get('refresh_token');
+        const hashParams = new URLSearchParams(window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '');
+        const urlRefreshToken = hashParams.get('refresh_token') || urlParams.get('refresh_token');
         if (urlRefreshToken) {
             refreshToken = urlRefreshToken;
             console.log('Using refresh_token from URL parameters');
@@ -318,13 +368,35 @@ function getAccessToken() {
         console.log('Cannot access localStorage, will use URL parameters');
     }
 
-    // Fallback: If not in localStorage, get from URL parameters
+    // Fallback: If not in localStorage, get from URL parameters (querystring + hash)
     const urlParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '');
     if (!accessToken) {
-        accessToken = urlParams.get('token');
+        accessToken =
+            hashParams.get('token') ||
+            urlParams.get('token') ||
+            hashParams.get('access_token') ||
+            urlParams.get('access_token');
     }
     if (!refreshToken) {
-        refreshToken = urlParams.get('refresh_token');
+        refreshToken = hashParams.get('refresh_token') || urlParams.get('refresh_token');
+    }
+
+    if (!tokenExpiresAt) {
+        const expiresAtParam = hashParams.get('expires_at') || urlParams.get('expires_at');
+        const expiresInParam = hashParams.get('expires_in') || urlParams.get('expires_in');
+
+        if (expiresAtParam) {
+            const parsed = parseInt(expiresAtParam, 10);
+            if (!Number.isNaN(parsed)) {
+                tokenExpiresAt = parsed;
+            }
+        } else if (expiresInParam) {
+            const parsed = parseInt(expiresInParam, 10);
+            if (!Number.isNaN(parsed)) {
+                tokenExpiresAt = Date.now() + (parsed * 1000);
+            }
+        }
     }
 
     // If we got tokens from URL but no expires_at, assume token might be expired
@@ -548,30 +620,39 @@ async function fetchCurrentTrack() {
 
         if (data.isPlaying && data.track) {
             const progress = data.track.progress;
-            if (typeof progress === 'number') {
-                if (progress === lastProgressValue) {
-                    stagnantProgressCount += 1;
-                    if (stagnantProgressCount >= DEFAULT_STAGNANT_PROGRESS_LIMIT) {
-                        console.log(`Progress unchanged across ${DEFAULT_STAGNANT_PROGRESS_LIMIT} polls, hiding overlay until playback resumes.`);
+            const trackId = typeof data.track.id === 'string' ? data.track.id : null;
+
+            if (trackId && trackId !== lastPolledTrackId) {
+                stagnantProgressCount = 0;
+                lastProgressValue = typeof progress === 'number' ? progress : null;
+                lastPolledTrackId = trackId;
+            } else {
+                lastPolledTrackId = trackId;
+                if (data.track.isPlaying === true && typeof progress === 'number') {
+                    if (progress === lastProgressValue) {
+                        stagnantProgressCount += 1;
+                        if (stagnantProgressCount >= DEFAULT_STAGNANT_PROGRESS_LIMIT) {
+                            if (overlayIdleState !== 'idleHidden') {
+                                console.log(`Progress unchanged across ${DEFAULT_STAGNANT_PROGRESS_LIMIT} polls, hiding overlay until playback resumes.`);
+                                enterIdleHiddenState();
+                            }
+                            return;
+                        }
+                    } else {
                         stagnantProgressCount = 0;
-                        lastProgressValue = null;
-                        currentTrackData = null;
-                        enterIdleHiddenState();
-                        return;
+                        lastProgressValue = progress;
                     }
                 } else {
                     stagnantProgressCount = 0;
-                    lastProgressValue = progress;
+                    lastProgressValue = typeof progress === 'number' ? progress : null;
                 }
-            } else {
-                stagnantProgressCount = 0;
-                lastProgressValue = null;
             }
 
             displayTrack(data.track);
         } else {
             stagnantProgressCount = 0;
             lastProgressValue = null;
+            lastPolledTrackId = null;
             showNotPlaying();
         }
     } catch (error) {
@@ -611,7 +692,8 @@ async function refreshAccessTokenWithOptions({ force }) {
 
             // First: Check URL parameters (most reliable for OBS Browser Source)
             const urlParams = new URLSearchParams(window.location.search);
-            storedRefreshToken = urlParams.get('refresh_token');
+            const hashParams = new URLSearchParams(window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '');
+            storedRefreshToken = hashParams.get('refresh_token') || urlParams.get('refresh_token');
 
             // Second: Check our variable (might have been set from URL on load)
             if (!storedRefreshToken && refreshToken) {
@@ -723,8 +805,18 @@ async function refreshAccessTokenWithOptions({ force }) {
 function displayTrack(track) {
     // Check if track has changed
     const trackChanged = !currentTrackData || currentTrackData.id !== track.id;
+    const isPlayingNow = track.isPlaying === true;
 
-    if (!trackChanged && track.isPlaying) {
+    // If playback resumed, cancel any pending pause-hide timer
+    if (isPlayingNow) {
+        lastPlaybackIsPlaying = true;
+        if (pauseHideTimeout) {
+            clearTimeout(pauseHideTimeout);
+            pauseHideTimeout = null;
+        }
+    }
+
+    if (!trackChanged && isPlayingNow) {
         // Same track; make sure the overlay is visible (it might have been hidden while idle)
         if (notPlayingTimeout) {
             clearTimeout(notPlayingTimeout);
@@ -732,10 +824,6 @@ function displayTrack(track) {
         }
 
         overlayIdleState = 'playing';
-        stagnantProgressCount = 0;
-        if (typeof track.progress === 'number') {
-            lastProgressValue = track.progress;
-        }
 
         if (widgetContainer) {
             widgetContainer.style.display = 'flex';
@@ -749,7 +837,7 @@ function displayTrack(track) {
         trackDisplay.style.display = 'flex';
 
         // Same track, just update progress if needed
-        if (track.progress !== undefined && track.duration !== undefined) {
+        if (typeof track.progress === 'number' && typeof track.duration === 'number') {
             startProgressTracking(track.progress, track.duration);
         }
         return;
@@ -761,33 +849,77 @@ function displayTrack(track) {
     }
 
     currentTrackData = track;
-    overlayIdleState = 'playing';
-    stagnantProgressCount = 0;
-    if (typeof track.progress === 'number') {
-        lastProgressValue = track.progress;
-    } else {
-        lastProgressValue = null;
+
+    // Show track display (or stay hidden, depending on paused settings)
+    if (notPlayingTimeout) {
+        clearTimeout(notPlayingTimeout);
+        notPlayingTimeout = null;
     }
 
-    // Update progress bar if track is playing
-    if (track.isPlaying && track.progress !== undefined && track.duration !== undefined) {
-        startProgressTracking(track.progress, track.duration);
-    } else {
-        // Clear progress if not playing
+    if (!isPlayingNow) {
+        const hideOnPause = isHideOnPauseEnabled();
+
+        // Freeze progress at the paused position (don't reset to 0)
         if (progressInterval) {
             clearInterval(progressInterval);
             progressInterval = null;
         }
         stopNearEndPolling();
-        progressFill.style.width = '0%';
-        currentTimeElement.textContent = '0:00';
-        totalTimeElement.textContent = track.duration ? formatTime(track.duration) : '0:00';
-    }
+        if (typeof track.progress === 'number' && typeof track.duration === 'number') {
+            setStaticProgress(track.progress, track.duration);
+        } else {
+            setStaticProgress(0, track.duration);
+        }
 
-    // Show track display
-    if (notPlayingTimeout) {
-        clearTimeout(notPlayingTimeout);
-        notPlayingTimeout = null;
+        // If configured, hide after a short delay while paused
+        if (hideOnPause) {
+            const delayMs = getPauseHideDelayMs();
+
+            // Already hidden? keep polling in the background, but don't reshow until playback resumes.
+            if (overlayIdleState === 'idleHidden') {
+                lastPlaybackIsPlaying = false;
+                return;
+            }
+
+            if (delayMs === 0) {
+                lastPlaybackIsPlaying = false;
+                enterIdleHiddenState();
+                return;
+            }
+
+            // Only schedule (or reschedule) when entering pause or when the paused track changes
+            const wasPaused = lastPlaybackIsPlaying === false;
+            if (!wasPaused || trackChanged) {
+                if (pauseHideTimeout) {
+                    clearTimeout(pauseHideTimeout);
+                }
+                pauseHideTimeout = setTimeout(() => {
+                    pauseHideTimeout = null;
+                    enterIdleHiddenState();
+                }, delayMs);
+            }
+        } else if (pauseHideTimeout) {
+            clearTimeout(pauseHideTimeout);
+            pauseHideTimeout = null;
+        }
+
+        overlayIdleState = 'playing';
+        lastPlaybackIsPlaying = false;
+    } else {
+        overlayIdleState = 'playing';
+
+        // Update progress bar if track is playing
+        if (typeof track.progress === 'number' && typeof track.duration === 'number') {
+            startProgressTracking(track.progress, track.duration);
+        } else {
+            // Clear progress if timing is missing
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            stopNearEndPolling();
+            setStaticProgress(0, track.duration);
+        }
     }
 
     if (widgetContainer) {
@@ -915,6 +1047,12 @@ function showNotPlaying() {
     }
     stopNearEndPolling();
 
+    if (pauseHideTimeout) {
+        clearTimeout(pauseHideTimeout);
+        pauseHideTimeout = null;
+    }
+    lastPlaybackIsPlaying = null;
+
     if (notPlayingTimeout) {
         clearTimeout(notPlayingTimeout);
         notPlayingTimeout = null;
@@ -957,6 +1095,12 @@ function showError(message) {
     }
     stopNearEndPolling();
 
+    if (pauseHideTimeout) {
+        clearTimeout(pauseHideTimeout);
+        pauseHideTimeout = null;
+    }
+    lastPlaybackIsPlaying = null;
+
     if (notPlayingTimeout) {
         clearTimeout(notPlayingTimeout);
         notPlayingTimeout = null;
@@ -986,6 +1130,11 @@ function enterIdleHiddenState() {
         progressInterval = null;
     }
     stopNearEndPolling();
+
+    if (pauseHideTimeout) {
+        clearTimeout(pauseHideTimeout);
+        pauseHideTimeout = null;
+    }
 
     if (notPlayingTimeout) {
         clearTimeout(notPlayingTimeout);

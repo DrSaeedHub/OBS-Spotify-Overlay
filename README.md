@@ -91,6 +91,7 @@ Watch the Spotify OBS Overlay in action with default settings on OBS Studio:
 1. **Get Your Widget URL**
    - After logging in, you'll see your unique widget URL
    - Click the "Copy" button to copy it
+   - Keep the full URL (including anything after `#`)
 
 2. **Add to OBS**
    - Open OBS Studio
@@ -156,6 +157,7 @@ Enable "Use Track Color" for any element to automatically apply the dominant col
 3. **Dynamic Theming**: Extracts dominant colors from album artwork using the ColorThief library
 4. **Progress Tracking**: Local progress calculation based on API timestamps (auto-hides if API progress is stagnant for 5 polls)
 5. **Token Management**: Automatic token refresh before expiration
+6. **Pause/Idle Behavior**: Pausing freezes the progress bar and auto-hides the widget after 5 seconds (configurable via `hideOnPause` + `pauseHideSeconds`/`pauseHideMs`)
 
 ## API Endpoints
 
@@ -224,7 +226,7 @@ OBS-Spotify-Overlay/
 **Important Notes:**
 - Free tier may spin down after 15 minutes of inactivity (services auto-wake on requests)
 - First request after spin-down can take 30-60 seconds
-- Your OBS overlay URL will be: `https://your-app-name.onrender.com/widget.html?user=USER_ID`
+- Your OBS overlay URL is shown on the dashboard after login (copy/paste it into OBS and keep the full URL, including anything after `#`)
 
 ### Option 2: Fly.io
 
@@ -293,6 +295,7 @@ Once deployed, get your widget URL for OBS:
 - Go to `https://your-deployed-url.com`
 - Log in with Spotify
 - Copy your unique widget URL
+- Keep the full URL (including anything after `#`)
 - Add it as a Browser Source in OBS
 
 ## Development

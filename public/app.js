@@ -57,6 +57,47 @@ window.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
 });
 
+function safeLocalStorageGetItem(key) {
+    try {
+        return localStorage.getItem(key);
+    } catch (e) {
+        return null;
+    }
+}
+
+function safeLocalStorageSetItem(key, value) {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function safeLocalStorageRemoveItem(key) {
+    try {
+        localStorage.removeItem(key);
+    } catch (e) {
+        // ignore
+    }
+}
+
+let inMemoryAccessToken = null;
+let inMemoryRefreshToken = null;
+let inMemoryExpiresAt = null;
+
+function getStoredAccessToken() {
+    return safeLocalStorageGetItem('access_token') || inMemoryAccessToken;
+}
+
+function getStoredRefreshToken() {
+    return safeLocalStorageGetItem('refresh_token') || inMemoryRefreshToken;
+}
+
+function getStoredExpiresAt() {
+    return safeLocalStorageGetItem('expires_at') || (inMemoryExpiresAt ? String(inMemoryExpiresAt) : null);
+}
+
 function setupEventListeners() {
     // Login button
     loginBtn.addEventListener('click', () => {
@@ -254,9 +295,11 @@ function toggleAccentColorUsage(colorInputId, checkbox) {
 async function checkAuthState() {
     // Check for tokens in URL params (from OAuth callback)
     const urlParams = new URLSearchParams(window.location.search);
-    const accessToken = urlParams.get('access_token');
-    const refreshToken = urlParams.get('refresh_token');
-    const expiresIn = urlParams.get('expires_in');
+    const hashParams = new URLSearchParams(window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '');
+
+    const accessToken = urlParams.get('access_token') || hashParams.get('access_token');
+    const refreshToken = urlParams.get('refresh_token') || hashParams.get('refresh_token');
+    const expiresIn = urlParams.get('expires_in') || hashParams.get('expires_in');
     const error = urlParams.get('error');
 
     // Show error if authentication failed
@@ -271,9 +314,11 @@ async function checkAuthState() {
         saveTokens(accessToken, refreshToken, expiresIn);
         window.history.replaceState({}, '', '/');
         showWidgetSection();
+        return;
     }
+
     // Check for existing tokens in localStorage
-    else if (localStorage.getItem('access_token')) {
+    else if (safeLocalStorageGetItem('access_token')) {
         // Check if token needs refreshing
         if (shouldRefreshToken()) {
             console.log('Token expired on startup, attempting refresh...');
@@ -289,16 +334,23 @@ async function checkAuthState() {
 }
 
 function saveTokens(accessToken, refreshToken, expiresIn) {
-    localStorage.setItem('access_token', accessToken);
-    localStorage.setItem('refresh_token', refreshToken);
+    inMemoryAccessToken = accessToken;
+    inMemoryRefreshToken = refreshToken;
+
+    safeLocalStorageSetItem('access_token', accessToken);
+    safeLocalStorageSetItem('refresh_token', refreshToken);
 
     // Calculate expiration time
-    const expiresAt = Date.now() + (parseInt(expiresIn) * 1000);
-    localStorage.setItem('expires_at', expiresAt);
+    const expiresInSeconds = parseInt(expiresIn, 10);
+    const safeExpiresInSeconds = Number.isFinite(expiresInSeconds) ? expiresInSeconds : 3600;
+    const expiresAt = Date.now() + (safeExpiresInSeconds * 1000);
+    inMemoryExpiresAt = expiresAt;
+    safeLocalStorageSetItem('expires_at', expiresAt.toString());
 }
 
 function isTokenExpired() {
-    const expiresAt = parseInt(localStorage.getItem('expires_at'));
+    const expiresAtRaw = getStoredExpiresAt();
+    const expiresAt = expiresAtRaw ? parseInt(expiresAtRaw, 10) : NaN;
     if (!expiresAt) return false;
     // Consider token expired if it expires within the next 5 minutes
     const fiveMinutesFromNow = Date.now() + (5 * 60 * 1000);
@@ -306,13 +358,13 @@ function isTokenExpired() {
 }
 
 function shouldRefreshToken() {
-    const refreshToken = localStorage.getItem('refresh_token');
-    const accessToken = localStorage.getItem('access_token');
+    const refreshToken = getStoredRefreshToken();
+    const accessToken = getStoredAccessToken();
     return refreshToken && (isTokenExpired() || !accessToken);
 }
 
 async function refreshAccessToken() {
-    const refreshToken = localStorage.getItem('refresh_token');
+    const refreshToken = getStoredRefreshToken();
 
     if (!refreshToken) {
         console.error('No refresh token available');
@@ -347,16 +399,20 @@ async function refreshAccessToken() {
         const data = await response.json();
 
         // Save new tokens
-        localStorage.setItem('access_token', data.access_token);
+        inMemoryAccessToken = data.access_token;
+        safeLocalStorageSetItem('access_token', data.access_token);
         if (data.refresh_token) {
-            localStorage.setItem('refresh_token', data.refresh_token);
+            inMemoryRefreshToken = data.refresh_token;
+            safeLocalStorageSetItem('refresh_token', data.refresh_token);
         }
         if (data.expires_in) {
             const expiresAt = Date.now() + (data.expires_in * 1000);
-            localStorage.setItem('expires_at', expiresAt.toString());
+            inMemoryExpiresAt = expiresAt;
+            safeLocalStorageSetItem('expires_at', expiresAt.toString());
         }
 
         console.log('Token refreshed successfully');
+        updateWidgetUrlInput();
         return true;
     } catch (error) {
         console.error('Error refreshing token:', error);
@@ -371,16 +427,8 @@ function showWidgetSection() {
     widgetSection.style.display = 'block';
 
     // Initialize selected style
-    const selectedStyle = localStorage.getItem('selectedStyle') || 'horizontal';
+    const selectedStyle = safeLocalStorageGetItem('selectedStyle') || 'horizontal';
     selectStyle(selectedStyle);
-
-    // Set up periodic token refresh check (every 10 minutes)
-    setInterval(async () => {
-        if (shouldRefreshToken()) {
-            console.log('Periodic token refresh check - refreshing...');
-            await refreshAccessToken();
-        }
-    }, 10 * 60 * 1000); // Check every 10 minutes
 
     // Load saved settings
     if (showSongName) {
@@ -494,11 +542,7 @@ function showWidgetSection() {
     loadAccentColorToggleStates();
 
     // Generate and display widget URL
-    const accessToken = localStorage.getItem('access_token');
-    if (accessToken) {
-        const widgetUrl = generateWidgetUrl(accessToken);
-        widgetUrlInput.value = widgetUrl;
-    }
+    updateWidgetUrlInput();
 
     // Initialize previews
     updateBackgroundPreview();
@@ -541,25 +585,41 @@ function loadAccentColorToggleStates() {
     });
 }
 
-function generateWidgetUrl(accessToken) {
+function updateWidgetUrlInput() {
+    if (!widgetUrlInput) return;
+    const url = generateWidgetUrl();
+    widgetUrlInput.value = url || '';
+}
+
+function generateWidgetUrl() {
     const baseUrl = window.location.origin;
-    const selectedStyle = localStorage.getItem('selectedStyle') || 'default';
+    const selectedStyle = safeLocalStorageGetItem('selectedStyle') || 'default';
     const settings = getSettings();
 
-    // Get refresh token from localStorage
-    const refreshToken = localStorage.getItem('refresh_token');
+    const accessToken = getStoredAccessToken();
+    const refreshToken = getStoredRefreshToken();
+    const expiresAt = getStoredExpiresAt();
 
-    let url = `${baseUrl}/widget.html?token=${encodeURIComponent(accessToken)}&style=${encodeURIComponent(selectedStyle)}`;
+    // Require at least one token so the widget can load in OBS/incognito without localStorage.
+    if (!accessToken && !refreshToken) return '';
 
-    // Include refresh token if available (needed for OBS where localStorage isn't accessible)
-    if (refreshToken) {
-        url += `&refresh_token=${encodeURIComponent(refreshToken)}`;
-    }
+    // Keep settings in querystring and tokens in hash for privacy (hash isn't sent to the server).
+    let url = `${baseUrl}/widget.html?style=${encodeURIComponent(selectedStyle)}`;
 
     // Add settings as URL parameters
     Object.keys(settings).forEach(key => {
         url += `&${key}=${encodeURIComponent(settings[key])}`;
     });
+
+    const tokenParams = new URLSearchParams();
+    if (refreshToken) tokenParams.set('refresh_token', refreshToken);
+    if (accessToken) tokenParams.set('token', accessToken);
+    if (expiresAt) tokenParams.set('expires_at', expiresAt);
+
+    const tokenFragment = tokenParams.toString();
+    if (tokenFragment) {
+        url += `#${tokenFragment}`;
+    }
 
     return url;
 }
@@ -633,11 +693,7 @@ function getSettings() {
 
 function handleSettingChange() {
     // Update widget URL when settings change
-    const accessToken = localStorage.getItem('access_token');
-    if (accessToken && widgetUrlInput) {
-        const widgetUrl = generateWidgetUrl(accessToken);
-        widgetUrlInput.value = widgetUrl;
-    }
+    updateWidgetUrlInput();
 
     // Save settings to localStorage
     if (showSongName) {
@@ -816,14 +872,8 @@ function selectStyle(style) {
     }
 
     // Save selected style
-    localStorage.setItem('selectedStyle', style);
-
-    // Update widget URL if it exists
-    const accessToken = localStorage.getItem('access_token');
-    if (accessToken && widgetUrlInput) {
-        const widgetUrl = generateWidgetUrl(accessToken);
-        widgetUrlInput.value = widgetUrl;
-    }
+    safeLocalStorageSetItem('selectedStyle', style);
+    updateWidgetUrlInput();
 }
 
 function copyWidgetUrl() {
@@ -857,9 +907,13 @@ function copyWidgetUrl() {
 
 function logout() {
     if (confirm('Are you sure you want to disconnect Spotify?')) {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('expires_at');
+        inMemoryAccessToken = null;
+        inMemoryRefreshToken = null;
+        inMemoryExpiresAt = null;
+
+        safeLocalStorageRemoveItem('access_token');
+        safeLocalStorageRemoveItem('refresh_token');
+        safeLocalStorageRemoveItem('expires_at');
 
         // Reload to show login page
         window.location.reload();
