@@ -1194,7 +1194,7 @@ body {
     }
 
     to {
-        width: 0%;
+        width: var(--next-progress, 0%);
     }
 }
 

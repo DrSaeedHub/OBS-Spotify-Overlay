@@ -155,7 +155,7 @@ Enable "Use Track Color" for any element to automatically apply the dominant col
 1. **Authentication**: Uses Spotify OAuth 2.0 with PKCE (Proof Key for Code Exchange) for secure authentication
 2. **Real-time Updates**: Polls Spotify API every 10 seconds by default (`refreshSeconds` or `refreshMs` URL params to change it)
 3. **Dynamic Theming**: Extracts dominant colors from album artwork using the ColorThief library
-4. **Progress Tracking**: Local progress calculation based on API timestamps (auto-hides if API progress is stagnant for 5 polls)
+4. **Progress Tracking**: Local progress calculation based on API timestamps (smooth progress between API polls)
 5. **Token Management**: Automatic token refresh before expiration
 6. **Pause/Idle Behavior**: Pausing freezes the progress bar and auto-hides the widget after 5 seconds (configurable via `hideOnPause` + `pauseHideSeconds`/`pauseHideMs`)
 
@@ -316,7 +316,7 @@ The server will run on `http://localhost:3000`
 
 ## Security Notes
 
-- Tokens are stored in browser localStorage
+- Tokens are handled client-side (URL hash for OBS/incognito support, localStorage when available); the server does not store user tokens
 - The server only acts as a proxy to avoid CORS issues
 - Never commit your `.env` file with credentials
 - The application uses HTTPS-ready redirect URIs

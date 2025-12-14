@@ -23,6 +23,7 @@ let refreshInterval;
 let progressInterval;
 let nearEndTimeout = null;
 let nearEndInterval = null;
+let progressResetTimeout = null;
 let currentTrackData = null;
 let accessToken = null;
 let refreshToken = null;
@@ -38,11 +39,7 @@ let refreshRetryAt = 0;
 let refreshFailureCount = 0;
 let notPlayingTimeout = null;
 let overlayIdleState = 'playing'; // 'playing' | 'idleVisible' | 'idleHidden' | 'error'
-let lastProgressValue = null;
-let stagnantProgressCount = 0;
-let lastPolledTrackId = null;
 const DEFAULT_TRACK_POLL_INTERVAL_MS = 10000;
-const DEFAULT_STAGNANT_PROGRESS_LIMIT = 5;
 const DEFAULT_PAUSE_HIDE_DELAY_MS = 5000;
 let pauseHideTimeout = null;
 let lastPlaybackIsPlaying = null;
@@ -127,6 +124,14 @@ function setStaticProgress(progress, duration) {
     progressFill.style.width = `${progressPercentage}%`;
     currentTimeElement.textContent = formatTime(progress);
     totalTimeElement.textContent = formatTime(duration);
+}
+
+function triggerFadeInAnimation(element) {
+    if (!element) return;
+    element.style.animation = 'none';
+    // Force reflow so the animation reliably restarts.
+    void element.offsetHeight;
+    element.style.animation = 'fadeIn 0.5s ease';
 }
 
 // Initialize
@@ -257,7 +262,7 @@ function formatTime(milliseconds) {
 }
 
 function updateProgress() {
-    if (!trackDuration || !trackProgress) return;
+    if (typeof trackDuration !== 'number' || typeof trackProgress !== 'number') return;
 
     // Calculate current progress based on elapsed time
     const now = Date.now();
@@ -619,40 +624,8 @@ async function fetchCurrentTrack() {
         const data = await response.json();
 
         if (data.isPlaying && data.track) {
-            const progress = data.track.progress;
-            const trackId = typeof data.track.id === 'string' ? data.track.id : null;
-
-            if (trackId && trackId !== lastPolledTrackId) {
-                stagnantProgressCount = 0;
-                lastProgressValue = typeof progress === 'number' ? progress : null;
-                lastPolledTrackId = trackId;
-            } else {
-                lastPolledTrackId = trackId;
-                if (data.track.isPlaying === true && typeof progress === 'number') {
-                    if (progress === lastProgressValue) {
-                        stagnantProgressCount += 1;
-                        if (stagnantProgressCount >= DEFAULT_STAGNANT_PROGRESS_LIMIT) {
-                            if (overlayIdleState !== 'idleHidden') {
-                                console.log(`Progress unchanged across ${DEFAULT_STAGNANT_PROGRESS_LIMIT} polls, hiding overlay until playback resumes.`);
-                                enterIdleHiddenState();
-                            }
-                            return;
-                        }
-                    } else {
-                        stagnantProgressCount = 0;
-                        lastProgressValue = progress;
-                    }
-                } else {
-                    stagnantProgressCount = 0;
-                    lastProgressValue = typeof progress === 'number' ? progress : null;
-                }
-            }
-
             displayTrack(data.track);
         } else {
-            stagnantProgressCount = 0;
-            lastProgressValue = null;
-            lastPolledTrackId = null;
             showNotPlaying();
         }
     } catch (error) {
@@ -803,6 +776,12 @@ async function refreshAccessTokenWithOptions({ force }) {
 }
 
 function displayTrack(track) {
+    const overlayWasHidden =
+        overlayIdleState === 'idleHidden' ||
+        (widgetContainer && widgetContainer.style.display === 'none') ||
+        (widgetContent && widgetContent.style.display === 'none');
+    const trackWasHidden = trackDisplay && trackDisplay.style.display === 'none';
+
     // Check if track has changed
     const trackChanged = !currentTrackData || currentTrackData.id !== track.id;
     const isPlayingNow = track.isPlaying === true;
@@ -839,6 +818,11 @@ function displayTrack(track) {
         // Same track, just update progress if needed
         if (typeof track.progress === 'number' && typeof track.duration === 'number') {
             startProgressTracking(track.progress, track.duration);
+        }
+
+        // Only animate when (re)entering the visible state.
+        if (overlayWasHidden || trackWasHidden) {
+            triggerFadeInAnimation(trackDisplay);
         }
         return;
     }
@@ -934,11 +918,10 @@ function displayTrack(track) {
     errorDisplay.style.display = 'none';
     trackDisplay.style.display = 'flex';
 
-    // Trigger animation
-    trackDisplay.style.animation = 'none';
-    setTimeout(() => {
-        trackDisplay.style.animation = 'fadeIn 0.5s ease';
-    }, 10);
+    // Only animate on track changes or when the overlay becomes visible again.
+    if (trackChanged || overlayWasHidden || trackWasHidden) {
+        triggerFadeInAnimation(trackDisplay);
+    }
 }
 
 function animateTrackChange(track) {
@@ -955,12 +938,28 @@ function animateTrackChange(track) {
         // Store current progress for animation
         const currentWidth = progressFillElement.style.width || '0%';
         progressFillElement.style.setProperty('--current-progress', currentWidth);
+        const duration = typeof track?.duration === 'number' ? track.duration : null;
+        const progress = typeof track?.progress === 'number' ? track.progress : null;
+        const nextProgressPercent =
+            duration && duration > 0 && progress !== null && progress >= 0
+                ? Math.min((progress / duration) * 100, 100)
+                : 0;
+        const nextWidth = `${nextProgressPercent}%`;
+        progressFillElement.style.setProperty('--next-progress', nextWidth);
+
         progressFillElement.classList.add('resetting');
 
-        // Remove resetting class after animation
-        setTimeout(() => {
+        if (progressResetTimeout) {
+            clearTimeout(progressResetTimeout);
+            progressResetTimeout = null;
+        }
+
+        // Remove resetting class after animation and lock to the new position.
+        // This prevents paused tracks from getting stuck at 0% after the animation finishes.
+        progressResetTimeout = setTimeout(() => {
+            progressResetTimeout = null;
             progressFillElement.classList.remove('resetting');
-            progressFillElement.style.width = '0%';
+            progressFillElement.style.width = nextWidth;
         }, 800);
     }
 
